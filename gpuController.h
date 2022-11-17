@@ -1,3 +1,5 @@
+#pragma once
+
 #include <SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -57,10 +59,10 @@ struct gpu_data{
        Uint32 *d_depthScreen;
 };
 
-void create_render_data(struct cpu_data **cpu_data, struct gpu_data **h_gpu_data, struct gpu_data **d_gpu_data, SDL_Surface *image, int nTrigs, const float *trigs, const Uint8 *clrs, float *v, float *o);
+int create_render_data(struct cpu_data **cpu_data, struct gpu_data **h_gpu_data, struct gpu_data **d_gpu_data, SDL_Surface *image, int nTrigs, const float *trigs, const Uint8 *clrs, float *v, float *o);
 
 // pointer to cpu_data, pointer of image surface, pointer to trig data, amount of trigs(nTrigs = 3*nFloat3's = 9*nfloats)
-void init_cpu_dat(struct cpu_data *dat, SDL_Surface *image, int nTrigs, const float *trigs, const Uint8 *clrs, float *v, float *o);
+int init_cpu_dat(struct cpu_data *dat, SDL_Surface *image, int nTrigs, const float *trigs, const Uint8 *clrs, float *v, float *o);
 
 void update_lens(struct cpu_data *dat, float *v, float *o);
 
@@ -68,11 +70,11 @@ void kill_cpu_data(struct cpu_data *dat);
 
 
 // GPU data stuff
-void init_gpu_dat(struct gpu_data *d_dat, struct gpu_data *h_dat, struct cpu_data *cpu_dat);
+int init_gpu_dat(struct gpu_data *d_dat, struct gpu_data *h_dat, struct cpu_data *cpu_dat);
 
 void kill_gpu_data(struct gpu_data *h_gDat);
 
 void update_GPU_lens(struct gpu_data *h_dat, struct cpu_data *cdat);
 
-void render_and_buffer(struct gpu_data *d_gDat, struct gpu_data *h_gDat, struct cpu_data *cDat);
+void render_and_buffer(struct gpu_data *d_gDat, struct gpu_data *h_gDat, struct cpu_data *cDat, int a, int b);
 
