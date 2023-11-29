@@ -30,6 +30,9 @@ typedef struct dynamic_render_data_t{
        float offset[3];
        // + other pre-calculated values
 
+       float view_real[3];
+       float offset_real[3];
+
 
 } dynamic_render_data_t;
 

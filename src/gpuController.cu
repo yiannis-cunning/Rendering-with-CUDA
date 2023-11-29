@@ -172,6 +172,35 @@ __device__ float dist(float *w, float *v, float * o){
        return sqrt(a*a + b*b + c*c);
 }
 
+
+__global__ void cordify2(struct gpu_data *dat, int num_floats){
+
+       int i = 3*(threadIdx.x + blockIdx.x * blockDim.x);
+
+       float px;
+       float py;
+       float pz;
+       float mag = *(float *)(dat->d_mag);
+
+
+       if(i < num_floats){
+
+              px = -1*dot(dat->d_trigs + i, dat->d_v, dat->d_offset);
+              py = dot(dat->d_trigs + i, dat->d_hx, dat->d_offset);
+              pz = dot(dat->d_trigs + i, dat->d_hy, dat->d_offset);
+              if(px < mag){
+                     *(float *)(dat->d_cords_arr + i) = -1.0f;
+                     *(float *)(dat->d_cords_arr + i + 1) = -1.0f;
+                     *(float *)(dat->d_cords_arr + i + 2) = -1.0f;  
+              }
+              else{
+                     *(float *)(dat->d_cords_arr + i) = (py*(mag)/(px)*0.5 + 0.5)*dat->d_w;
+                     *(float *)(dat->d_cords_arr + i + 1) = (pz*(mag)/(px)*0.5 + 0.5)*dat->d_h;
+                     *(float *)(dat->d_cords_arr + i + 2) = dist(dat->d_trigs + i, dat->d_v, dat->d_offset);
+              }
+       }
+}
+
 __global__ void cordify(struct gpu_data *dat, int num_floats){ // Run for each vector j = float j*3 = i{
        
        // i is starting index of a vector

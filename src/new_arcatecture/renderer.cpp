@@ -1,7 +1,7 @@
 #include "renderer.h"
 #include "common.h"
 
-#include "../gpuController.h"
+#include "gpuController.h"
 #include "../File_Conversion/readSTL.h"
 
 
@@ -68,9 +68,11 @@ DWORD WINAPI cuda_sender_init(LPVOID param){
        // Create controller data
        float pos[3] = {10, 10, 0};
        float view[3] = {-10, -10, -10};
+       float vreal[3] = {-10, -10, -10};
+       float oreal[3] = {10, 10, 10};
 
        // Create render data and links to window
-       if(create_render_data(&render_data_cpu, &h_render_data_gpu, &d_render_data_gpu, dynamic_render_data->imageSurface, nTrigs, trigs, clrs, dynamic_render_data->view, dynamic_render_data->offset) == 0){printf("Error init render data. \n");return 0;}
+       if(create_render_data(&render_data_cpu, &h_render_data_gpu, &d_render_data_gpu, dynamic_render_data->imageSurface, nTrigs, trigs, clrs, dynamic_render_data->view, dynamic_render_data->offset, vreal, oreal) == 0){printf("Error init render data. \n");return 0;}
        
        ReleaseSemaphore( finish_use_sem,  // handle to semaphore
                                    1,            // increase count by one
@@ -96,13 +98,13 @@ int cuda_sender_loop(LPVOID param){
        while(1){
               // 1) wait for request to send render frame
 
-              printf("Waiting for command to start making the frame\n");
+              //printf("Waiting for command to start making the frame\n");
               ret = WaitForSingleObject(sendkernel_sem, INFINITE); // decrement command
-              printf("Got signal, loading from the dynamic data\n");
+              //printf("Got signal, loading from the dynamic data\n");
 
 
-              update_lens(render_data_cpu, dynamic_render_data->view, dynamic_render_data->offset);
-              update_GPU_lens(h_render_data_gpu, render_data_cpu);
+              update_lens(render_data_cpu, dynamic_render_data->view, dynamic_render_data->offset, dynamic_render_data->view_real, dynamic_render_data->offset_real);
+              update_GPU_lens(h_render_data_gpu, render_data_cpu, d_render_data_gpu);
               render_and_buffer(d_render_data_gpu, h_render_data_gpu, render_data_cpu, 2, 2);
               
               ReleaseSemaphore( finish_use_sem,  // handle to semaphore

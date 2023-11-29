@@ -45,3 +45,17 @@ public:
        void send_position();
        bool tick_update();
 };
+
+
+class controller2{
+       float r, theta, phi;
+       float inc, incang;
+
+public:
+       float view[3];
+       float offset[3];
+       struct pressing press;
+
+       controller2(float *view_init, float *offset_init);
+       bool tick_update();
+};

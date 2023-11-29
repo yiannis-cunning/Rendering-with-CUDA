@@ -1,4 +1,76 @@
 #include "controlModes.h"
+
+
+controller2::controller2(float *view_init, float *offset_init){
+
+       cpyVec(view_init, view);
+       cpyVec(offset_init, offset);
+
+       phi = 2.1862760354653;
+       theta = -1*3*3.14159256/4;
+       r = vecMag(view_init);
+
+       inc = 25;
+       incang = 2*3.14159256*3/500;
+}
+
+
+bool controller2::tick_update(){
+       float temp[3], temp2[3];
+       float zaxis[3] = {0, 0, 1};
+       float xaxis[3] = {1, 0, 0};
+       float yaxis[3] = {0, 1, 0};
+       bool changed;
+
+       if(press.a == 1 || press.d == 1){
+              constMult((inc/(press.j == 1 ? 10 : 1))*(press.a-press.d), xaxis, temp);
+              addVec(temp, offset, offset);
+              changed = true;
+       }
+       if(press.s == 1 || press.w == 1){
+              constMult(inc/(press.j == 1 ? 10 : 1)*(press.w-press.s), yaxis, temp);
+              addVec(temp, offset, offset);
+              changed = true;
+       }
+       if(press.dxmov != 0 || press.dymov != 0){
+              phi += incang*(press.dymov/100);
+              phi = (phi < 3.14159256-incang) ? phi : phi - incang;
+              phi = (phi > incang) ? phi : phi + incang;
+              theta += incang*(press.dxmov/100);
+              press.dxmov = 0;
+              press.dymov = 0;
+                            /*phi += incang*(press.i - press.k);
+                            phi = (phi < pi-incang) ? phi : phi - incang;
+                            phi = (phi > incang) ? phi : phi + incang;
+                            theta += incang*(press.l - press.j);*/
+              changed = true;
+       }
+       if(press.space == 1 || press.shift == 1){
+              constMult((press.space - press.shift)*inc/(press.j == 1 ? 10 : 1), zaxis, temp);
+              addVec(temp, offset, offset);
+              changed = true;
+       }
+       
+       setVector(view, r*cos(theta)*sin(phi), r*sin(phi)*sin(theta), r*cos(phi));
+
+       return changed;
+}
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
+
 // Set the data to initial position.
 controller::controller(float *p_0, float *v_0)
 {
@@ -49,6 +121,8 @@ void jumpMode::send_position(){
 bool jumpMode::tick_update(struct pressing *press){
        float temp[3], temp2[3];
        float zaxis[3] = {0, 0, 1};
+       float xaxis[3] = {1, 0, 0};
+       float yaxis[3] = {0, 1, 0};
        bool changed;
        if(press->a == 1 || press->d == 1){
               cpyVec(view, temp);
@@ -56,6 +130,7 @@ bool jumpMode::tick_update(struct pressing *press){
               cross(temp, zaxis, temp2);
               normalize(temp2);
               constMult((inc/(press->j == 1 ? 10 : 1))*(press->a-press->d), temp2, temp);
+              constMult((inc/(press->j == 1 ? 10 : 1))*(press->a-press->d), xaxis, temp);
               addVec(temp, pos, pos);
               changed = true;
        }
@@ -64,6 +139,7 @@ bool jumpMode::tick_update(struct pressing *press){
               temp[2] = 0;
               normalize(temp);
               constMult(inc/(press->j == 1 ? 10 : 1)*(press->w-press->s), temp, temp);
+              constMult(inc/(press->j == 1 ? 10 : 1)*(press->w-press->s), yaxis, temp);
               addVec(temp, pos, pos);
               changed = true;
        }
@@ -85,6 +161,7 @@ bool jumpMode::tick_update(struct pressing *press){
               addVec(temp, pos, pos);
               changed = true;
        }
+       
 
        send_position();
        return changed;

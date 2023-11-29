@@ -95,6 +95,10 @@ int loop_back(){
 
        DWORD ret;
        int first = 1;
+       int paused = 0;
+       float vec1[3] = {-10, -10, -10};
+       float vec2[3] = {10, 10, 10};
+       controller2 cntr2(vec1, vec2);
 
        unsigned int t_start, t_end;
        while(wind->isRunning)
@@ -143,6 +147,18 @@ int loop_back(){
                                                  break;
                                           case SDL_SCANCODE_ESCAPE:
                                                  wind->isRunning = false;
+                                                 break;
+                                          case SDL_SCANCODE_P:
+                                                 if(!paused){
+                                                        SDL_ShowCursor(SDL_ENABLE);
+                                                        SDL_SetRelativeMouseMode(SDL_FALSE);
+                                                        paused = 1;
+                                                 } else{
+                                                        SDL_ShowCursor(SDL_DISABLE);
+                                                        SDL_SetRelativeMouseMode(SDL_TRUE);
+                                                        paused = 0;  
+                                                 }
+                                                 break;
                                    }
                                    break;
                             case SDL_KEYUP:
@@ -194,13 +210,21 @@ int loop_back(){
               
               // Update screen
               if((int)SDL_GetTicks() - (int)wind->last_update > 30){
+                     memcpy(&cntr2.press, &c.press, sizeof(pressing));
+                     bool chnge2 = cntr2.tick_update();
                      bool changed = c.tick_update();
                      if(changed){
                             // 1) set the dynamic render data
                             cpyVec(c.offset, render_data->offset);
                             cpyVec(c.v, render_data->view);
+                            //addVec(cntr2.offset, cntr2.view, render_data->offset);
+                            //constMult(-1, cntr2.view, render_data->view );
+                            cpyVec(cntr2.offset, render_data->offset_real);
+                            cpyVec(cntr2.view, render_data->view_real);
 
-                            printf("Inputs have changed game state -> starting render frame\n");
+                            fflush(stdout);
+                            //printf("\rOFFSET: %f, %f, %f \t", cntr2.offset[0], cntr2.offset[1], cntr2.offset[2]);
+                            //printf("VIEW:   %f, %f, %f", cntr2.view[0], cntr2.view[1], cntr2.view[2]);
                             // 2) post semaphore to start job
                             ReleaseSemaphore( 
                                    start_frame_sem,  // handle to semaphore
