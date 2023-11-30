@@ -1,248 +1,324 @@
-__device__ float dot(float *v, float *w, float *o){
-       return (*v - *o)*(*w) + (*(v + 1) - *(o + 1))*(*(w + 1)) + (*(v + 2) - *(o + 2))*(*(w + 2));
-}
 
-__device__ void crossG(float *v, float *w, float *ans){
-       ans[0] = v[1] * w[2] - w[1] * v[2];
-       ans[1] = v[2] * w[0] - v[0] * w[2];
-       ans[2] = v[0] * w[1] - w[0] * v[1];
-}
+#include "renderer_cuda.h"
 
-__device__ void subG(float *v, float *w, float *ans){
-       for(int i = 0; i < 3; i++){
-              ans[i] = v[i] - w[i];
+
+void passert_cuda(bool cond, static char *msg){
+       if(!cond){
+              printf("CUDA ERROR: %s: %s\n", msg, cudaGetErrorString(cudaGetLastError()));
+              exit(1);
        }
 }
 
-__device__ float dist(float *w, float *v, float * o){
-       float a = w[0] - o[0] - v[0];
-       float b = w[1] - o[1] - v[1];
-       float c = w[2] - o[2] - v[2];
-       return sqrt(a*a + b*b + c*c);
+
+void safe_cudaAlloc(void **dest, uint32_t size, static char *msg){
+       cudaMalloc(dest, size);
+       if(*dest == NULL){
+              printf("CUDA ALLOCATION ERROR: %s: %s", msg, cudaGetErrorString(cudaGetLastError()));
+              exit(1);
+       }
 }
 
-__global__ void cordify(struct gpu_data *dat, int num_floats){ // Run for each vector j = float j*3 = i{
+
+typedef struct asset_t{    // array struct
+       uint32_t      nTrigs;
+       float         *trigs;
+       uint8_t       *colors;
+} asset_t;
+
+
+
+typedef struct asset_record_t {    // Linked list struct
+       uint32_t             nTrigs;
+       float                *d_trigs;
+       uint8_t              *d_colors;
+       asset_record_t       *next;
+} asset_record_t;
+
+
+
+typedef struct static_render_data_t{
+       // output frame buffer + info
+       uint8_t       *pixels_arr;
+       uint32_t      *depthScreen_arr;
+       uint8_t       BPP;
+       uint32_t      pitch;
+       uint32_t      w;
+       uint32_t      h;
+
+       // Stored assets
+       asset_t      *asset_pointer_arr;                           // Variable array -> needs to be resized on addtions
+
+} static_render_data_t;
+
+
+typedef struct instance2_t {
+       int    asset_id;
+       float  *buffer_loc;
+
+       float offset[3];
+} instance2_t;
+
+
+typedef struct dynamic_render_data2_t{
+       float offset[3];
+       float view[3];
+
+       instance2_t *instances_arr;
+};
+
+
+
+
+typedef struct gpu_allocations_t{
+
+       static_render_data_t *d_static_data;
+       static_render_data_t static_data_local_copy;
+       uint32_t             *d_depthScreen_arr;
+       uint8_t              *d_pixels_arr;
+
+       int                   asset_arr_size;
+       int                   n_assets;
+       asset_record_t       *asset_record_head;         // linked list of other allocations
+       asset_t              *d_asset_pointer_arr;
+
+
+       dynamic_render_data2_t      *d_dynamic_data;
+
+       uint32_t                    n_instances;
+       uint32_t                    sz_buffer;
+       instance2_t                 *instance_pointer_arr;
+       float                       *d_cord_arr_buffer;
+
+} gpu_allocations_t;
+
+
+
+
+
+static gpu_allocations_t *allocs;
+
+
+void add_record(asset_record_t *head, asset_record_t *new_record){
+       if(head == NULL){
+              return ;
+       }
+       while(head->next != NULL){
+              head = head->next;
+       }
+       head->next = new_record;
+}
+
+asset_record_t *get_nth_record(asset_record_t *head, int n){
+       while(head != NULL && n != 0){
+              n = n - 1;
+              head = head->next;
+       }
+       return head;
+}
+
+
+
+int init(SDL_Surface *image){
+       allocs = (gpu_allocations_t *)calloc(sizeof(gpu_allocations_t), 1);
+       passert(allocs != NULL, "Initing cuda renderer");
+
+       static_render_data_t srd;
+
+       srd.pixels_arr       = NULL;
+       srd.depthScreen_arr  = NULL;
+       srd.BPP              = image->format->BytesPerPixel;
+       srd.pitch            = image->pitch;
+       srd.w                = image->w;
+       srd.h                = image->h;
+       srd.asset_pointer_arr= NULL;
+
+       int pixel_arr_size = srd.pitch*srd.h*sizeof(Uint8);
+       int depth_arr_size = srd.w*srd.h*sizeof(uint32_t);
+
+       safe_cudaAlloc((void **)&(allocs->d_depthScreen_arr), depth_arr_size, "Depth array");
+
+       safe_cudaAlloc((void **)&(allocs->d_pixels_arr), pixel_arr_size, "Pixel array");
+
+       safe_cudaAlloc((void **)&(allocs->d_static_data), sizeof(static_render_data_t), "Static render data");
+
+       safe_cudaAlloc((void **)&(allocs->d_dynamic_data), sizeof(dynamic_render_data2_t), "Dynamic render data");
        
-       // i is starting index of a vector
-       int i = 3*(threadIdx.x + blockIdx.x * blockDim.x); //0, 3, 6
+       srd.depthScreen_arr = allocs->d_depthScreen_arr;
+       srd.pixels_arr = allocs->d_pixels_arr;
 
-       float topx = *(float *)(dat->d_c1);
-       float topy = topx;
-       float bot =  *(float *)(dat->d_mag);
-       float mag;
+       memcpy(&(allocs->static_data_local_copy), &srd, sizeof(static_render_data_t));
+       cudaMemcpy(allocs->d_static_data, &srd, sizeof(static_render_data_t), cudaMemcpyHostToDevice);
 
+       return 0;
+}
+
+int alloc_asset(float *trigs, uint8_t *colors, uint32_t nTrigs){
+
+       // 1) Allocate space for new asset (a) space in array for pointer - maybe, (b) trig and color arr - always
+       if(allocs->asset_arr_size == allocs->n_assets){
+              // Need to resize array
+              asset_t *new_allocation;
+              int old_arr_size = allocs->n_assets;
+              int new_arr_size = allocs->n_assets * 2 + 1;
+
+              safe_cudaAlloc((void **)&(new_allocation), sizeof(asset_t)*new_arr_size, "Resizing asset array");
+              cudaMemcpy(new_allocation, allocs->d_asset_pointer_arr, old_arr_size, cudaMemcpyDeviceToDevice); // Making own kernel would be faster apperently 
+              cudaFree(allocs->d_asset_pointer_arr);
+              allocs->d_asset_pointer_arr = new_allocation;
+              
+              // Copy over the new sigular pointer to the asset array
+              allocs->static_data_local_copy.asset_pointer_arr = new_allocation;
+              cudaMemcpy(allocs->d_static_data, &(allocs->static_data_local_copy), sizeof(static_render_data_t), cudaMemcpyHostToDevice);
+
+       }
+       allocs->n_assets = allocs->n_assets + 1;
+
+
+       // Either way will need to allocate new gpu space for trigs and colors
+       int trig_arr_size = nTrigs * sizeof(float) * 9;
+       int color_arr_size = nTrigs * sizeof(uint8_t) * 3;
+
+       // keep the record of the allocation
+       asset_record_t *new_asset_record = (asset_record_t *)calloc(sizeof(asset_record_t), 1);
+       new_asset_record->nTrigs = nTrigs;
+       new_asset_record->next = NULL;
+       if(allocs->asset_record_head == NULL){
+              allocs->asset_record_head = new_asset_record;
+       } else{
+              add_record(allocs->asset_record_head, new_asset_record);
+       
+       }
+       safe_cudaAlloc((void **)&(new_asset_record->d_trigs), trig_arr_size, "New asset trianlge array");
+       safe_cudaAlloc((void **)&(new_asset_record->d_colors), color_arr_size, "New asset color array");
+
+
+       asset_t gpu_asset;
+       gpu_asset.nTrigs = nTrigs;
+       gpu_asset.trigs = new_asset_record->d_trigs;
+       gpu_asset.colors = new_asset_record->d_colors;
+
+
+       // 2) copy over the data 
+       cudaMemcpy(gpu_asset.trigs, trigs, trig_arr_size, cudaMemcpyHostToDevice);
+       cudaMemcpy(gpu_asset.colors, colors, color_arr_size, cudaMemcpyHostToDevice);
+       cudaMemcpy(allocs->d_asset_pointer_arr + allocs->n_assets - 1, &gpu_asset, sizeof(asset_t), cudaMemcpyHostToDevice);
        
 
-       // float *w = dat->d_trigs + i*3
-       if(i < num_floats){
-              // 1) calculate the x component
-
-              topx = dot(dat->d_trigs + i, dat->d_hx, dat->d_offset) * topx;
-              topy = dot(dat->d_trigs + i, dat->d_hy, dat->d_offset) * topy;
-              bot = bot - dot(dat->d_trigs + i, dat->d_v, dat->d_offset);
-              //bot = dot(dat->d_trigs + i, dat->d_v, dat->d_offset);
-              mag = dist(dat->d_trigs + i, dat->d_v, dat->d_offset);
-
-              if(bot <= 0.1* *(float *)(dat->d_mag))
-              //if(bot <= 0) //-0.1* *(float *)(dat->d_mag))
-              //if(bot/(*(float *)(dat->d_mag)) <= 0.1 || bot >= (*(float *)(dat->d_mag)))
-              //if(bot == 0)
-              { // behind
-                     *(float *)(dat->d_cords_arr + i) = -1.0f;
-                     *(float *)(dat->d_cords_arr + i + 1) = -1.0f;
-                     *(float *)(dat->d_cords_arr + i + 2) = -1.0f;
-              }
-              else
-              {
-                     //
-                     //bot = *(float *)(dat->d_mag) - bot;
-                     *(float *)(dat->d_cords_arr + i) = (topx/bot + 0.5)*dat->d_w;
-                     *(float *)(dat->d_cords_arr + i + 1) = (topy/bot + 0.5)*dat->d_h;
-                     *(float *)(dat->d_cords_arr + i + 2) = mag;
-              }
-
-       }
-}
-
-__device__ float max(float a, float b, float c, float d){
-       return (((a > b) ? a:b) > ((c > d) ? c:d) ? ((a > b) ? a:b):((c > d) ? c:d));
-}
-
-__device__ float min(float a, float b, float c, float d){
-       return (((a < b) ? a:b) < ((c < d) ? c:d) ? ((a < b) ? a:b):((c < d) ? c:d));
+       return 0;
 }
 
 
-// Want to paint the area of the triangle given the cords in dat.
-// First load in the triangle cordanates
-// make a vector formula for each line joining the points
-// P1P2, P2P3, P3P1
-// Start at the minimium of y values -> to the maximum y value of the triangle
-// for a given y0, find the range of x's you need to paint
-// at x, y check the depth of the point and check if the points in range of the screen and then paint it
-
-// Form is    t = a*y_0 + b
-//            x = c*t   + d
-// Side 0: P0->P1: v = P0 + t*(P1 - P0) --> (y_0 - P0_y)/(P1_y - P0_y) = t, x = P0_x + t*(P1_x - P0_x)
-// Side 1: P1->P2:
-// Side 3: P2->P0
- 
-__global__ void draw(struct gpu_data *dat, int num_floats){
-       // Run for each triangle: have x and y dimensions on the threads
-       // y dim traverses the y direction, x values traverse the x direction
-
-
-       int n = 9*blockIdx.x;
-       int thread_num = threadIdx.x + threadIdx.y*blockDim.x; // goes from 0->512
-
-       if(n < num_floats){
-              __shared__ float points[3][3];                   // points[j] = p1 = {x, y ,z} (cords that define the trianlge)
-              __shared__ float yMin, yMax, xMin, xMax;         // constants to traverse the x values of the triangle
-              __shared__ float as[3];
-              __shared__ float bs[3];
-              __shared__ float cs[3];
-              __shared__ float ds[3];
-              __shared__ float c, b, a;                        // depth(x,y) = a+bx+cy (returns float) -> depth array is in int (mult by 1000)
-
-              float depth, t, xT, xMint, xMaxt, y, x;        // Temporary local variables
-              int Ix, Iy;
-              // First copy over triangle cords to shared memory
-              if(thread_num < 9 ){
-                     points[(int)(thread_num/3)][thread_num % 3] = dat->d_cords_arr[n + thread_num];
-              }
-
-              if(points[0][2] != -1 && points[1][2] != -1 && points[2][2] != -1){
-
-                     // Next create depth arry stuff and bounding square on trianlge - all a function of points
-                     if(thread_num == 0){
-                            yMin = min(points[0][1], points[1][1], points[2][1], dat->d_h);
-                            yMin = (yMin < 0) ? 0: yMin;
-                            yMax = max(points[0][1], points[1][1], points[2][1], 0);
-                            yMax = (yMax > dat->d_h) ? dat->d_h : yMax;
-                            xMin = min(points[0][0], points[1][0], points[2][0], dat->d_w);
-                            xMax = max(points[0][0], points[1][0], points[2][0], 0);
-
-                            c = points[0][1]*(points[2][0] - points[1][0]) - points[1][1]*(points[2][0] - points[0][0]) + points[2][1]*(points[1][0] - points[0][0]);
-                            b = points[2][0] - points[0][0];
-                            if(c != 0 && b != 0){
-                                   c = (points[0][2]*(points[2][0] - points[1][0]) - points[1][2]*(points[2][0] - points[0][0]) + points[2][2]*(points[1][0] - points[0][0]))/c;
-                                   b = ((points[2][2] - points[0][2]) - c*(points[2][1] - points[0][1]))/b;
-                                   a = points[0][2] - b*points[0][0] - c*points[0][1];
-                            }
-                            else{
-                                   c = 0;
-                                   b = 0;
-                                   a = min(points[0][2], points[1][2], points[2][2], 10);// (points[0][2] + points[1][2] + points[2][2])/3;
-                            }
-                     }
-
-                     // Then spilt up the creation of the x range function for the triangle (determines the pixels to traverse given a y value)
-                     if(thread_num < 3){
-                            if(points[(thread_num+1)%3][1] == points[thread_num][1]){ // for vertical lines
-                                   as[thread_num] = 0;
-                                   bs[thread_num] = -1;
-                            }
-                            else{
-                                   as[thread_num] = 1/(points[(thread_num+1)%3][1] - points[thread_num][1]);
-                                   bs[thread_num] = -1 * points[thread_num][1] * as[thread_num];
-                            }
-                            cs[thread_num] = points[(thread_num+1)%3][0] - points[thread_num][0];
-                            ds[thread_num] = points[thread_num][0];
-                     }
-                     __syncthreads();
-                     // 0, 0.9, 1.8, 2.7 --> bd = 2
-                     // Then traverse the triangle. -> want to run from yMin to yMax inc 0.9
-                     for(float yi = yMin; yi <= yMax; yi += ((float)blockDim.y)*0.8){
-                            y = yi + 0.8*((float)threadIdx.y);
-                            //y = yi;
-
-                            if(y <= yMax){
-                                   // Find the x range
-                                   xMint = xMax;
-                                   xMaxt = xMin;
-                                   
-                                   for(int j = 0; j < 3; j++){
-                                          t = as[j]*y + bs[j];
-                                          xT = cs[j]*t + ds[j];
-                                          if(t <= 1 && t >= 0)
-                                          {
-                                                 if(xT < xMint){xMint = xT;}
-                                                 if(xT > xMaxt){xMaxt = xT;}
-                                          }
-                                   }
-                                   xMint = (xMint < 0) ? 0: xMint;
-                                   xMaxt = (xMaxt > dat->d_w) ? dat->d_w : xMaxt;
-                                   // Want to traverse the x range
-                                   for(float xi = xMint; xi <= xMaxt; xi += blockDim.x*0.8){
-                                          x = xi + 0.8*threadIdx.x;
-                                          if(x <= xMaxt){
-                                                 Iy = dat->d_h - (int)y;
-                                                 Ix = (int)x;
-                                                 depth = (a + b*x + c*y)*1000;
-                                                 // Make sure that the pixel is within range of the screen and compare the depth.
-                                                 if(Iy >= 0 && Iy < dat->d_h && Ix >= 0 && Ix < dat->d_w){
-                                                        atomicMin(dat->d_depthScreen + Iy*dat->d_w + Ix, (int)depth);
-                                                        
-                                                        if(dat->d_depthScreen[Iy*dat->d_w + Ix] == (int)depth){
-                                                               // Paint the pixel and set new depth
-                                                               //dat->d_depthScreen[Iy*dat->d_w + Ix] = (int)depth;
-                                                               dat->d_pixels_arr[Iy*dat->d_pitch + Ix*dat->d_BPP] = dat->d_colors[(int)(n/3)]*!(Ix == (int)xMaxt || Ix == xMint);
-                                                               dat->d_pixels_arr[Iy*dat->d_pitch + Ix*dat->d_BPP + 1] = dat->d_colors[(int)(n/3) + 1]*!(Ix == (int)xMaxt || Ix == xMint);
-                                                               dat->d_pixels_arr[Iy*dat->d_pitch + Ix*dat->d_BPP + 2] = dat->d_colors[(int)(n/3) + 2]*!(Ix == (int)xMaxt || Ix == xMint);
-
-                                                        }
-                                                 }
-                                          }
-                                   }
-                            }
-                     }
-              }
-       }
-}
-
-
-float maxh(float a, float b, float c, float d){
-       return (((a > b) ? a:b) > ((c > d) ? c:d) ? ((a > b) ? a:b):((c > d) ? c:d));
-}
-
-float minh(float a, float b, float c, float d){
-       return (((a < b) ? a:b) < ((c < d) ? c:d) ? ((a < b) ? a:b):((c < d) ? c:d));
-}
-void print_cords(int nTrigs, float *trigs){
-       printf("\nPrinting object data for %d triangles...\n", nTrigs);
-       for(int i = 0; i < nTrigs; i++){
-              printf("Triangle %d:\n\t P1: (%f, %f, %f) \n\t P2: (%f, %f, %f) \n\t P3:(%f, %f, %f) \n\n",
-                     i, trigs[9*i], trigs[9*i + 1], trigs[9*i + 2], trigs[9*i + 3],
-                     trigs[9*i + 4], trigs[9*i + 5], trigs[9*i + 6], trigs[9*i + 7],
-                     trigs[9*i + 8]);
-              printf("Bounding box: xs: %f, xf: %f ;; ys: %f, yf: %f\n", 
-                     minh(trigs[9*i], trigs[9*i + 3], trigs[9*i + 6], trigs[9*i + 6]), 
-                     maxh(trigs[9*i], trigs[9*i + 3], trigs[9*i + 6], trigs[9*i + 6]),
-                     minh(trigs[9*i + 1], trigs[9*i + 4], trigs[9*i + 7], trigs[9*i + 8]),
-                     maxh(trigs[9*i + 1], trigs[9*i + 4], trigs[9*i + 7], trigs[9*i + 8]));
-                     
-       }
-}
-void render_and_buffer(struct gpu_data *d_gDat, struct gpu_data *h_gDat, struct cpu_data *cDat, int a, int b){
+int update_dynamic_data(float *view, float *offset, instance_t *inst_data, int n_instances){
+       //cudaMemcpy(allocs->d_dynamic_data, dyn_rend_data, sizeof(dynamic_render_data2_t), cudaMemcpyHostToDevice);
        
-       // 1. Paint pixels white and reset depth array to max
-       cudaMemset(h_gDat->d_pixels_arr, (Uint8)(0), cDat->pix_arr_size);
-       cudaMemset(h_gDat->d_depthScreen, (Uint8)(0xFF), cDat->depth_arr_size);
-
-       // Turn all triangle vectors into cords
-       int n = cDat->nTrigs;
-       dim3 grid_size( (int)(n*3 / 512) + 1);
-       dim3 block_size(512);
-
-       cordify<<<grid_size, block_size>>>(d_gDat, n*9);
-
-       dim3 blck(16,16);
-       draw<<<n, blck>>>(d_gDat, n*9);//(nt-ns)
+       dynamic_render_data2_t new_dynamic_rd = {0};
+       cpyVec(view, new_dynamic_rd.view);
+       cpyVec(offset, new_dynamic_rd.offset);
 
 
-       // Copy the pixel array back to the window
-       cudaMemcpy(cDat->pixels_arr, h_gDat->d_pixels_arr, (cDat->pix_arr_size)*sizeof(Uint8), cudaMemcpyDeviceToHost);
+       
+       instance_t *head = inst_data;
+       if(head == NULL){
+              cudaMemcpy(allocs->d_dynamic_data, &new_dynamic_rd, sizeof(dynamic_render_data2_t), cudaMemcpyHostToDevice);
+              return 0;
+       }
 
+       // Get the size of buffer needed for this amount of instances
+       asset_record_t *asst_head = allocs->asset_record_head;
+       asset_record_t *asset;
+       uint32_t inst_sum;
+       int i = 0;
+       while(head != NULL){
+              asset = get_nth_record(asst_head, head->asset_id);
+              if(asset == NULL){
+                     return -1;
+              }
+              inst_sum = asset->nTrigs*9;
+              head = head->next;
+              i += 1;
+       }
+       if(n_instances != i){
+              return -1;
+       }
+
+       // Make a bigger buffer if needed
+       if(allocs->sz_buffer < inst_sum){
+              float *new_allocation_cord = NULL;
+              safe_cudaAlloc((void **)&(new_allocation_cord), inst_sum*sizeof(float), "Resizing cord/buffer array");
+              cudaFree(allocs->d_cord_arr_buffer);
+              allocs->d_cord_arr_buffer = new_allocation_cord;
+       }
+
+       // Make a bigger buffer if needed
+       if(allocs->n_instances < n_instances){
+              instance2_t *new_allocation_inst = NULL;
+              safe_cudaAlloc((void **)&(new_allocation_inst), n_instances*sizeof(instance2_t), "Resizing instnace array");
+              cudaFree(allocs->instance_pointer_arr);
+              allocs->instance_pointer_arr = new_allocation_inst;
+       }
+
+       // Now allocate buffer space for each instance
+       new_dynamic_rd.instances_arr = allocs->instance_pointer_arr;
+       
+       instance2_t new_inst;
+       uint32_t running_offset = 0;
+       head = inst_data;
+       for(int i = 0; i < n_instances; i += 1){
+              new_inst.asset_id = head->asset_id;
+              cpyVec(head->offset, new_inst.offset);
+              new_inst.buffer_loc = allocs->d_cord_arr_buffer + running_offset;
+
+              asset = get_nth_record(asst_head, head->asset_id);
+              running_offset = running_offset + asset->nTrigs*9;
+              head = head->next;
+              cudaMemcpy(allocs->instance_pointer_arr + i, &new_inst, sizeof(instance2_t), cudaMemcpyHostToDevice);
+
+       }
+
+       cudaMemcpy(allocs->d_dynamic_data, &new_dynamic_rd, sizeof(dynamic_render_data2_t), cudaMemcpyHostToDevice);
+
+       return 0;
 }
 
 
+
+void *get_device_trig_pointer(){
+       if(allocs == NULL){
+              return NULL;
+       }
+       passert(allocs->asset_record_head != NULL, "There are no asset records");
+       return (void *)allocs->asset_record_head->d_trigs;
+}
+
+
+/*
+[static data]
+       [depth], [pixel], [assetp, assetp, assetp]
+
+[dynamic data]
+
+
+
+*/
+
+int kill(){
+       cudaFree(allocs->d_static_data);
+       cudaFree(allocs->d_depthScreen_arr);
+       cudaFree(allocs->d_pixels_arr);
+       cudaFree(allocs->d_asset_pointer_arr);
+       cudaFree(allocs->d_dynamic_data);
+
+
+       asset_record_t *cur_asset_rec = allocs->asset_record_head;
+       asset_record_t *prev_asset_rec;
+
+       while(cur_asset_rec != NULL){
+              cudaFree(cur_asset_rec->d_trigs);    // Free the trig array
+              cudaFree(cur_asset_rec->d_colors);   // Free color array
+              prev_asset_rec = cur_asset_rec;
+              cur_asset_rec = cur_asset_rec->next;
+              free(prev_asset_rec);              // Free this record
+       }
+       free(allocs);
+       return 0;
+}

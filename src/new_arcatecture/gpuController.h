@@ -7,6 +7,7 @@
 #include <math.h>
 #include "linalg.h"
 
+
 struct cpu_data{
        // Object data
        int nTrigs;
@@ -72,6 +73,7 @@ struct gpu_data{
        Uint32 *d_depthScreen;
 };
 
+
 int create_render_data(struct cpu_data **cpu_data, struct gpu_data **h_gpu_data, struct gpu_data **d_gpu_data, SDL_Surface *image, int nTrigs, const float *trigs, const Uint8 *clrs, float *v, float *o, float *v_real, float *o_real);
 
 // pointer to cpu_data, pointer of image surface, pointer to trig data, amount of trigs(nTrigs = 3*nFloat3's = 9*nfloats)
@@ -89,5 +91,5 @@ void kill_gpu_data(struct gpu_data *h_gDat);
 
 void update_GPU_lens(struct gpu_data *h_dat, struct cpu_data *cdat, struct gpu_data *d_dat);
 
-void render_and_buffer(struct gpu_data *d_gDat, struct gpu_data *h_gDat, struct cpu_data *cDat, int a, int b);
+void render_and_buffer(struct gpu_data *d_gDat, struct gpu_data *h_gDat, struct cpu_data *cDat, int a, int b, void *gpu_data);
 

@@ -8,8 +8,10 @@ void kill();
 int loop_back();
 
 static dynamic_render_data_t *render_data = NULL;
+static dynamic_render_data_t local_copy_render_data;
 static HANDLE start_frame_sem;
 static HANDLE render_done_sem;
+static HANDLE dynamic_data_mutex;
 //static dynamic_render_data_t * shared_dynamic_data = NULL;
 
 static float pos[3] = {10, 10, 0};
@@ -25,33 +27,18 @@ DWORD WINAPI looper_init(LPVOID param){
 
        start_frame_sem = args->sem1;
        render_done_sem = args->sem2;
-       
+       dynamic_data_mutex = args->mutex1;
+       render_data = (dynamic_render_data_t *)args->p1;
+
 
        // 2) Start the SDL window and set up the start recivein I/O messages
        passert(c.v != NULL && c.offset != NULL,"Error initilizing position data." );
-       
 
        passert(create_window(&wind, 900, 900) != 0, "Error initializing window.");
        SDL_ShowCursor(SDL_DISABLE);
        SDL_SetRelativeMouseMode(SDL_TRUE);
 
-       
-
-
-       //render_data = (dynamic_render_data_t *)calloc(sizeof(dynamic_render_data_t), 1);
-       render_data = (dynamic_render_data_t *)args->p1;
-       render_data->imageSurface = wind->imageSurface;
-       cpyVec(pos, render_data->offset);
-       cpyVec(view, render_data->view);
-
-       printf("Sending the init command to other thread\n");
-       ReleaseSemaphore( 
-       start_frame_sem,  // handle to semaphore
-       1,     // increase count by one
-       NULL);       // not interested in previous count
-       
-       // wait for init to finish
-       WaitForSingleObject(render_done_sem, INFINITE); // decrement command
+       local_copy_render_data.imageSurface = wind->imageSurface;
        
 
 
@@ -64,26 +51,6 @@ DWORD WINAPI looper_init(LPVOID param){
 }
 
 
-/*
-       passert(c.v != NULL && c.offset != NULL,"Error initilizing position data." );
-
-       passert(create_window(&wind, 900, 900) != 0, "Error initializing window.");
-       SDL_ShowCursor(SDL_DISABLE);
-       SDL_SetRelativeMouseMode(SDL_TRUE);
-
-       render_data = (dynamic_render_data_t *)calloc(sizeof(dynamic_render_data_t), 1);
-       passert(render_data != NULL, "Error allocating render data.");
-       render_data->head = NULL;
-       render_data->nInstances = 0;
-       cpyVec(pos, render_data->offset);
-       cpyVec(view, render_data->view);
-
-
-       return loop_back();
-
-}
-
-*/
 void kill(){
        kill_window(wind);
 }
@@ -99,6 +66,21 @@ int loop_back(){
        float vec1[3] = {-10, -10, -10};
        float vec2[3] = {10, 10, 10};
        controller2 cntr2(vec1, vec2);
+
+
+       // Start by sending initial render data to renderer
+       cpyVec(c.offset, local_copy_render_data.offset);
+       cpyVec(c.v, local_copy_render_data.view);
+       //addVec(cntr2.offset, cntr2.view, render_data->offset);
+       //constMult(-1, cntr2.view, render_data->view );
+       cpyVec(cntr2.offset, local_copy_render_data.offset_real);
+       cpyVec(cntr2.view, local_copy_render_data.view_real);
+
+       memcpy(render_data, &local_copy_render_data, sizeof(dynamic_render_data_t));
+
+       // Allow rendered to init and send first frame
+       ReleaseSemaphore( start_frame_sem, 1, NULL);
+
 
        unsigned int t_start, t_end;
        while(wind->isRunning)
@@ -213,35 +195,34 @@ int loop_back(){
                      memcpy(&cntr2.press, &c.press, sizeof(pressing));
                      bool chnge2 = cntr2.tick_update();
                      bool changed = c.tick_update();
+
+
                      if(changed){
-                            // 1) set the dynamic render data
-                            cpyVec(c.offset, render_data->offset);
-                            cpyVec(c.v, render_data->view);
-                            //addVec(cntr2.offset, cntr2.view, render_data->offset);
-                            //constMult(-1, cntr2.view, render_data->view );
-                            cpyVec(cntr2.offset, render_data->offset_real);
-                            cpyVec(cntr2.view, render_data->view_real);
+                            // 1) update state/position/dynamic data varibles
+
+                            cpyVec(c.offset, local_copy_render_data.offset);
+                            cpyVec(c.v, local_copy_render_data.view);
+                            cpyVec(cntr2.offset, local_copy_render_data.offset_real);
+                            cpyVec(cntr2.view, local_copy_render_data.view_real);
 
                             fflush(stdout);
                             //printf("\rOFFSET: %f, %f, %f \t", cntr2.offset[0], cntr2.offset[1], cntr2.offset[2]);
                             //printf("VIEW:   %f, %f, %f", cntr2.view[0], cntr2.view[1], cntr2.view[2]);
-                            // 2) post semaphore to start job
-                            ReleaseSemaphore( 
+
+                            // 2) check if there is a frame to buffer -> if not conitnue
+                            ret = WaitForSingleObject(render_done_sem, 0L); // decrement command
+                            if(ret != WAIT_TIMEOUT ){
+                                   update_window(wind);
+                                   memcpy(render_data, &local_copy_render_data, sizeof(dynamic_render_data_t));
+                                   ReleaseSemaphore( 
                                    start_frame_sem,  // handle to semaphore
                                    1,            // increase count by one
                                    NULL);       // not interested in previous count
-                            
-                            WaitForSingleObject(render_done_sem, INFINITE); // decrement command
-                            first = 0;
-                            update_window(wind);
-                            // 3) wait on semaphore for job to end
-                            //ret = WaitForSingleObject(render_done_sem, INFINITE);
-                            //update_window(wind);
-                            //wind->last_update = SDL_GetTicks();
+                            }
+
+                            wind->last_update = SDL_GetTicks();
                             /*
                             t_start = SDL_GetTicks();
-                            update_lens(render_data_cpu, c.v, c.offset);
-                            update_GPU_lens(h_render_data_gpu, render_data_cpu);
                             t_end = SDL_GetTicks();
                             printf("Time to update renderData: %d\n", t_end-t_start);
                             t_start = SDL_GetTicks();

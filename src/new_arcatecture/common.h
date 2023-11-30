@@ -1,3 +1,4 @@
+#pragma once
 #include <C:\clibs\SDL2\include\SDL.h>
 #include <stdio.h>
 #include <stdlib.h>
@@ -11,12 +12,14 @@
 
 void passert(bool tf, const char *msg);
 
-
-typedef struct instance_t{
+typedef struct instance_t {
+       float offset[3];
+       bool is_visible;
        int asset_id;
-       float pos[3];
-       bool visible;
-}instance_t;
+
+       instance_t *next;
+
+} instance_t;
 
 
 
@@ -24,7 +27,7 @@ typedef struct dynamic_render_data_t{
        SDL_Surface *imageSurface;
 
        int nInstances;
-       instance_t *head;
+       instance_t *inst_head;
 
        float view[3];
        float offset[3];
@@ -40,6 +43,10 @@ typedef struct dynamic_render_data_t{
 typedef struct thread_args_t{
        HANDLE sem1;
        HANDLE sem2;
+       HANDLE mutex1;
+
        void *p1;
        void *wind;
 } thread_args_t;
+
+

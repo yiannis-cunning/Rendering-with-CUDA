@@ -7,6 +7,7 @@
 #include "gpuController.h"
 
 
+
 int create_render_data(struct cpu_data **cpu_data, struct gpu_data **h_gpu_data, struct gpu_data **d_gpu_data, SDL_Surface *image, int nTrigs, const float *trigs, const Uint8 *clrs, float *v, float *o, float *v_real, float *o_real){
        // Holds all relevent dat about the objects, render constants, and imagescreen info
        //     Used to keep track of these things
@@ -192,7 +193,7 @@ __device__ float dist(float *w, float *v, float * o){
 }
 
 
-__global__ void cordify2(struct gpu_data *dat, int num_floats){
+__global__ void cordify2(struct gpu_data *dat, int num_floats, float *trigs){
 
        int i = 3*(threadIdx.x + blockIdx.x * blockDim.x);
 
@@ -204,9 +205,9 @@ __global__ void cordify2(struct gpu_data *dat, int num_floats){
 
        if(i < num_floats){
 
-              px = dot(dat->d_trigs + i, dat->view_real, dat->offset_real);
-              py = -1*dot(dat->d_trigs + i, dat->hx_real, dat->offset_real);
-              pz = dot(dat->d_trigs + i, dat->hy_real, dat->offset_real);
+              px = dot(trigs + i, dat->view_real, dat->offset_real);
+              py = -1*dot(trigs + i, dat->hx_real, dat->offset_real);
+              pz = dot(trigs + i, dat->hy_real, dat->offset_real);
               if(px < mag){
                      *(float *)(dat->d_cords_arr + i) = -1.0f;
                      *(float *)(dat->d_cords_arr + i + 1) = -1.0f;
@@ -215,7 +216,7 @@ __global__ void cordify2(struct gpu_data *dat, int num_floats){
               else{
                      *(float *)(dat->d_cords_arr + i) = ((py*mag*0.5)/(px) + 0.5)*dat->d_w;
                      *(float *)(dat->d_cords_arr + i + 1) = ((pz*mag*0.5)/(px) + 0.5)*dat->d_h;
-                     *(float *)(dat->d_cords_arr + i + 2) = dist(dat->d_trigs + i, dat->view_real, dat->offset_real);
+                     *(float *)(dat->d_cords_arr + i + 2) = dist(trigs + i, dat->view_real, dat->offset_real);
               }
        }
 }
@@ -422,7 +423,7 @@ void print_cords(int nTrigs, float *trigs){
                      
        }
 }
-void render_and_buffer(struct gpu_data *d_gDat, struct gpu_data *h_gDat, struct cpu_data *cDat, int a, int b){
+void render_and_buffer(struct gpu_data *d_gDat, struct gpu_data *h_gDat, struct cpu_data *cDat, int a, int b, void *gpu_data){
        
        // 1. Paint pixels white and reset depth array to max
        cudaMemset(h_gDat->d_pixels_arr, (Uint8)(0), cDat->pix_arr_size);
@@ -433,7 +434,7 @@ void render_and_buffer(struct gpu_data *d_gDat, struct gpu_data *h_gDat, struct 
        dim3 grid_size( (int)(n*3 / 512) + 1);
        dim3 block_size(512);
 
-       cordify2<<<grid_size, block_size>>>(d_gDat, n*9);
+       cordify2<<<grid_size, block_size>>>(d_gDat, n*9, (float *)gpu_data);
 
        dim3 blck(16,16);
        draw<<<n, blck>>>(d_gDat, n*9);//(nt-ns)

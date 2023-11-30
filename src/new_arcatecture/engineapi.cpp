@@ -11,6 +11,7 @@ void start_window(){
      void *dynamic_data;
 
      HANDLE sendcore_sem, rdy_to_send_sem;
+     HANDLE mutex1;
      // 1) Common resources
 
      sendcore_sem = CreateSemaphore( NULL, 0, 1,NULL); // security stuff, initial count, maximum count, name stuff
@@ -19,6 +20,8 @@ void start_window(){
      passert(rdy_to_send_sem != NULL, "Error init-ing semaphore");
      dynamic_data = calloc(sizeof(dynamic_render_data_t), 1);
 
+     mutex1 = CreateMutexA(NULL, false, NULL);
+     passert(mutex1 != NULL, "Error init-ing mutex");
 
 
      // 2) thread for msg loop and 1 thread for launching cuda kernels
@@ -27,6 +30,7 @@ void start_window(){
      msgloop_args->sem1 = sendcore_sem;
      msgloop_args->sem2 = rdy_to_send_sem;
      msgloop_args->p1 = dynamic_data;
+     msgloop_args->mutex1 = mutex1;
      
      msgloop_threadp = CreateThread( 
           NULL,                    // default security attributes
@@ -44,6 +48,7 @@ void start_window(){
      cudacore_args->sem1 = sendcore_sem;
      cudacore_args->sem2 = rdy_to_send_sem;
      cudacore_args->p1 = dynamic_data;
+     cudacore_args->mutex1 = mutex1;
      
      cudacore_threadp = CreateThread( 
           NULL,                    // default security attributes
