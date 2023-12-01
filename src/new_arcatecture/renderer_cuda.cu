@@ -2,7 +2,7 @@
 #include "renderer_cuda.h"
 
 
-void passert_cuda(bool cond, static char *msg){
+void passert_cuda(bool cond, const char *msg){
        if(!cond){
               printf("CUDA ERROR: %s: %s\n", msg, cudaGetErrorString(cudaGetLastError()));
               exit(1);
@@ -10,20 +10,14 @@ void passert_cuda(bool cond, static char *msg){
 }
 
 
-void safe_cudaAlloc(void **dest, uint32_t size, static char *msg){
+void safe_cudaAlloc(void **dest, uint32_t size, const char *msg){
        cudaMalloc(dest, size);
        if(*dest == NULL){
-              printf("CUDA ALLOCATION ERROR: %s: %s", msg, cudaGetErrorString(cudaGetLastError()));
+              printf("CUDA ALLOCATION ERROR: %s: %s\n", msg, cudaGetErrorString(cudaGetLastError()));
               exit(1);
        }
 }
 
-
-typedef struct asset_t{    // array struct
-       uint32_t      nTrigs;
-       float         *trigs;
-       uint8_t       *colors;
-} asset_t;
 
 
 
@@ -36,35 +30,6 @@ typedef struct asset_record_t {    // Linked list struct
 
 
 
-typedef struct static_render_data_t{
-       // output frame buffer + info
-       uint8_t       *pixels_arr;
-       uint32_t      *depthScreen_arr;
-       uint8_t       BPP;
-       uint32_t      pitch;
-       uint32_t      w;
-       uint32_t      h;
-
-       // Stored assets
-       asset_t      *asset_pointer_arr;                           // Variable array -> needs to be resized on addtions
-
-} static_render_data_t;
-
-
-typedef struct instance2_t {
-       int    asset_id;
-       float  *buffer_loc;
-
-       float offset[3];
-} instance2_t;
-
-
-typedef struct dynamic_render_data2_t{
-       float offset[3];
-       float view[3];
-
-       instance2_t *instances_arr;
-};
 
 
 
@@ -163,7 +128,9 @@ int alloc_asset(float *trigs, uint8_t *colors, uint32_t nTrigs){
 
               safe_cudaAlloc((void **)&(new_allocation), sizeof(asset_t)*new_arr_size, "Resizing asset array");
               cudaMemcpy(new_allocation, allocs->d_asset_pointer_arr, old_arr_size, cudaMemcpyDeviceToDevice); // Making own kernel would be faster apperently 
-              cudaFree(allocs->d_asset_pointer_arr);
+              if(allocs->d_asset_pointer_arr != NULL){
+                     cudaFree(allocs->d_asset_pointer_arr);
+              }
               allocs->d_asset_pointer_arr = new_allocation;
               
               // Copy over the new sigular pointer to the asset array
@@ -208,14 +175,17 @@ int alloc_asset(float *trigs, uint8_t *colors, uint32_t nTrigs){
 }
 
 
+// Takes in positon data + list of instances
 int update_dynamic_data(float *view, float *offset, instance_t *inst_data, int n_instances){
        //cudaMemcpy(allocs->d_dynamic_data, dyn_rend_data, sizeof(dynamic_render_data2_t), cudaMemcpyHostToDevice);
        
+
+       // 1) copy over position data to buffer
        dynamic_render_data2_t new_dynamic_rd = {0};
        cpyVec(view, new_dynamic_rd.view);
        cpyVec(offset, new_dynamic_rd.offset);
 
-
+       new_dynamic_rd.instances_arr = allocs->instance_pointer_arr;
        
        instance_t *head = inst_data;
        if(head == NULL){
@@ -223,15 +193,15 @@ int update_dynamic_data(float *view, float *offset, instance_t *inst_data, int n
               return 0;
        }
 
-       // Get the size of buffer needed for this amount of instances
+       // 2) Get the size of buffer needed for all these instances -> pointer array size is n_instances*sizeof(instance2_t)
        asset_record_t *asst_head = allocs->asset_record_head;
        asset_record_t *asset;
        uint32_t inst_sum;
        int i = 0;
-       while(head != NULL){
+       while(head != NULL && i < n_instances){
               asset = get_nth_record(asst_head, head->asset_id);
               if(asset == NULL){
-                     return -1;
+                     return -1;    // Refering to a unkown asset
               }
               inst_sum = asset->nTrigs*9;
               head = head->next;
@@ -241,23 +211,30 @@ int update_dynamic_data(float *view, float *offset, instance_t *inst_data, int n
               return -1;
        }
 
-       // Make a bigger buffer if needed
+       // 3) Make a bigger buffer if needed - cord_arr
        if(allocs->sz_buffer < inst_sum){
               float *new_allocation_cord = NULL;
               safe_cudaAlloc((void **)&(new_allocation_cord), inst_sum*sizeof(float), "Resizing cord/buffer array");
-              cudaFree(allocs->d_cord_arr_buffer);
+              if(allocs->d_cord_arr_buffer != NULL){
+                     cudaFree(allocs->d_cord_arr_buffer);
+              }
+              allocs->sz_buffer = inst_sum*sizeof(float);
               allocs->d_cord_arr_buffer = new_allocation_cord;
        }
 
-       // Make a bigger buffer if needed
+       // 4) Make a bigger buffer if needed - pointer arr
        if(allocs->n_instances < n_instances){
               instance2_t *new_allocation_inst = NULL;
               safe_cudaAlloc((void **)&(new_allocation_inst), n_instances*sizeof(instance2_t), "Resizing instnace array");
-              cudaFree(allocs->instance_pointer_arr);
+              
+              if(allocs->instance_pointer_arr != NULL){
+                     cudaFree(allocs->instance_pointer_arr);
+              }
+              allocs->n_instances = n_instances;
               allocs->instance_pointer_arr = new_allocation_inst;
        }
 
-       // Now allocate buffer space for each instance
+       // 5) Now allocate buffer space for each instance - offsets into big block of memory - and also copy over the pointers
        new_dynamic_rd.instances_arr = allocs->instance_pointer_arr;
        
        instance2_t new_inst;
@@ -269,6 +246,8 @@ int update_dynamic_data(float *view, float *offset, instance_t *inst_data, int n
               new_inst.buffer_loc = allocs->d_cord_arr_buffer + running_offset;
 
               asset = get_nth_record(asst_head, head->asset_id);
+              passert(asset != NULL, "Error with code");
+
               running_offset = running_offset + asset->nTrigs*9;
               head = head->next;
               cudaMemcpy(allocs->instance_pointer_arr + i, &new_inst, sizeof(instance2_t), cudaMemcpyHostToDevice);
@@ -291,6 +270,13 @@ void *get_device_trig_pointer(){
 }
 
 
+void *get_static_render_data_p(){
+       return (void *)allocs->d_static_data;
+}
+
+void *get_dynamic_render_data_p(){
+       return (void *)allocs->d_dynamic_data;
+}
 /*
 [static data]
        [depth], [pixel], [assetp, assetp, assetp]

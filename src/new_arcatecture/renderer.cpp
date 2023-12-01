@@ -78,17 +78,29 @@ DWORD WINAPI cuda_sender_init(LPVOID param){
 
 int cuda_sender_loop(LPVOID param){
        DWORD ret;
-       void *gpu_data = get_device_trig_pointer();
-       passert(gpu_data != NULL, "renderer cuda not inited");
+       int reti;
+       void *static_data = NULL;
+       void *dyna_data = NULL;
+
 
 
        while(1){
               // 1) wait for request to send render frame
 
 
+              //reti = update_dynamic_data(dynamic_render_data->view, dynamic_render_data->offset, dynamic_render_data->inst_head, dynamic_render_data->nInstances);
+              passert(reti == 0, "Updating dynamic render data");
+              
+              static_data = get_static_render_data_p();
+              dyna_data = get_dynamic_render_data_p();
+              passert(static_data != NULL && dyna_data != NULL, "static and dynamic data check");
+
+
               update_lens(render_data_cpu, dynamic_render_data->view, dynamic_render_data->offset, dynamic_render_data->view_real, dynamic_render_data->offset_real);
               update_GPU_lens(h_render_data_gpu, render_data_cpu, d_render_data_gpu);
-              render_and_buffer(d_render_data_gpu, h_render_data_gpu, render_data_cpu, 2, 2, gpu_data);
+              
+              
+              render_and_buffer(d_render_data_gpu, h_render_data_gpu, render_data_cpu, 2, 2, static_data, dyna_data);
               
               ReleaseSemaphore( finish_use_sem,  // handle to semaphore
                                    1,            // increase count by one

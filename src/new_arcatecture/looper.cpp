@@ -40,7 +40,14 @@ DWORD WINAPI looper_init(LPVOID param){
 
        local_copy_render_data.imageSurface = wind->imageSurface;
        
+       instance_t *cow = (instance_t *)calloc(sizeof(instance_t), 1);
+       cow->asset_id = 0;
+       cow->is_visible = 1;
+       cow->next = NULL;
+       setVector(cow->offset, 0, 0, 0);
 
+       local_copy_render_data.inst_head = cow;
+       local_copy_render_data.nInstances = 1;
 
        // 3) enter msgloop
        printf("Created windows in game loop thread - starting msg loop\n");
@@ -77,6 +84,8 @@ int loop_back(){
        cpyVec(cntr2.view, local_copy_render_data.view_real);
 
        memcpy(render_data, &local_copy_render_data, sizeof(dynamic_render_data_t));
+
+
 
        // Allow rendered to init and send first frame
        ReleaseSemaphore( start_frame_sem, 1, NULL);
