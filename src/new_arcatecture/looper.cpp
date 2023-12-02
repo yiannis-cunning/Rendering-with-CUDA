@@ -41,13 +41,19 @@ DWORD WINAPI looper_init(LPVOID param){
        local_copy_render_data.imageSurface = wind->imageSurface;
        
        instance_t *cow = (instance_t *)calloc(sizeof(instance_t), 1);
+       instance_t *cow2 = (instance_t *)calloc(sizeof(instance_t), 1);
        cow->asset_id = 0;
        cow->is_visible = 1;
-       cow->next = NULL;
+       cow->next = cow2;
        setVector(cow->offset, 0, 0, 0);
 
+       cow2->asset_id = 0;
+       cow2->is_visible = 1;
+       cow2->next = NULL;
+       setVector(cow->offset, -500, -1000, 3385);
+
        local_copy_render_data.inst_head = cow;
-       local_copy_render_data.nInstances = 1;
+       local_copy_render_data.nInstances = 2;
 
        // 3) enter msgloop
        printf("Created windows in game loop thread - starting msg loop\n");
@@ -62,13 +68,13 @@ void kill(){
        kill_window(wind);
 }
 
-
+// -500, -1000, 3385 
 
 // msg, frame, and control loops
 int loop_back(){
 
        DWORD ret;
-       int first = 1;
+
        int paused = 0;
        float vec1[3] = {-10, -10, -10};
        float vec2[3] = {10, 10, 10};
@@ -76,10 +82,7 @@ int loop_back(){
 
 
        // Start by sending initial render data to renderer
-       cpyVec(c.offset, local_copy_render_data.offset);
-       cpyVec(c.v, local_copy_render_data.view);
-       //addVec(cntr2.offset, cntr2.view, render_data->offset);
-       //constMult(-1, cntr2.view, render_data->view );
+
        cpyVec(cntr2.offset, local_copy_render_data.offset_real);
        cpyVec(cntr2.view, local_copy_render_data.view_real);
 
@@ -187,6 +190,9 @@ int loop_back(){
                                           case SDL_SCANCODE_R:
                                                  c.press.r = 0;
                                                  break;
+                                          case SDL_SCANCODE_M:
+                                                 cntr2.rotate_mode();
+                                                 break;
                                    }
                                    break;
                             case SDL_MOUSEMOTION:
@@ -209,14 +215,12 @@ int loop_back(){
                      if(changed){
                             // 1) update state/position/dynamic data varibles
 
-                            cpyVec(c.offset, local_copy_render_data.offset);
-                            cpyVec(c.v, local_copy_render_data.view);
                             cpyVec(cntr2.offset, local_copy_render_data.offset_real);
                             cpyVec(cntr2.view, local_copy_render_data.view_real);
 
                             fflush(stdout);
-                            //printf("\rOFFSET: %f, %f, %f \t", cntr2.offset[0], cntr2.offset[1], cntr2.offset[2]);
-                            //printf("VIEW:   %f, %f, %f", cntr2.view[0], cntr2.view[1], cntr2.view[2]);
+                            printf("\rOFFSET: %f, %f, %f \t", cntr2.offset[0], cntr2.offset[1], cntr2.offset[2]);
+                            printf("VIEW:   %f, %f, %f", cntr2.view[0], cntr2.view[1], cntr2.view[2]);
 
                             // 2) check if there is a frame to buffer -> if not conitnue
                             ret = WaitForSingleObject(render_done_sem, 0L); // decrement command
@@ -253,3 +257,16 @@ int loop_back(){
        return 0; 
 
 }
+
+
+
+/*
+CONTROLS
+       : j = speed up
+       : p = pause mouse mode
+       : asdw/mouse - normal
+       : m = rotate mode
+
+
+
+*/

@@ -6,10 +6,11 @@ controller2::controller2(float *view_init, float *offset_init){
        cpyVec(view_init, view);
        cpyVec(offset_init, offset);
 
+
+       mode = CONTROL_FLY_MODE;
        phi = 2.1862760354653;
        theta = -1*3*3.14159256/4;
        r = vecMag(view_init);
-
        inc = 25;
        incang = 2*3.14159256*3/500;
 }
@@ -23,12 +24,24 @@ bool controller2::tick_update(){
        bool changed;
 
        if(press.a == 1 || press.d == 1){
-              constMult((inc/(press.j == 1 ? 10 : 1))*(press.a-press.d), xaxis, temp);
+              if(mode == CONTROL_FLY_MODE){
+                     cross(zaxis, view, temp);
+                     normalize(temp);
+                     constMult((inc/(press.j == 1 ? 10 : 1))*(press.d-press.a), temp, temp);
+              }else{
+                     constMult((inc/(press.j == 1 ? 10 : 1))*(press.a-press.d), xaxis, temp);
+              }
               addVec(temp, offset, offset);
               changed = true;
        }
        if(press.s == 1 || press.w == 1){
-              constMult(inc/(press.j == 1 ? 10 : 1)*(press.w-press.s), yaxis, temp);
+              if(mode == CONTROL_FLY_MODE){
+                     cpyVec(view, temp);
+                     normalize(temp);
+                     constMult((inc/(press.j == 1 ? 10 : 1))*(press.w-press.s), temp, temp);
+              }else {
+                     constMult(inc/(press.j == 1 ? 10 : 1)*(press.w-press.s), yaxis, temp);
+              }
               addVec(temp, offset, offset);
               changed = true;
        }
@@ -58,7 +71,13 @@ bool controller2::tick_update(){
 
 
 
-
+void controller2::rotate_mode(){
+       if(mode == CONTROL_FLY_MODE){
+              mode = CONTROL_XYZ_MODE;
+       } else if(mode == CONTROL_XYZ_MODE){
+              mode = CONTROL_FLY_MODE;
+       }
+}
 
 
 

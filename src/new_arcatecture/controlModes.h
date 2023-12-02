@@ -2,6 +2,11 @@
 #include <math.h>
 #include <stdlib.h>
 
+
+typedef enum {CONTROL_FLY_MODE, CONTROL_XYZ_MODE} control_mode_enum;
+
+
+
 struct pressing{
        bool w, a, s, d, i, j, k, l, shift, space, r;
        float dxmov, dymov;
@@ -50,6 +55,7 @@ public:
 class controller2{
        float r, theta, phi;
        float inc, incang;
+       control_mode_enum mode;
 
 public:
        float view[3];
@@ -58,4 +64,5 @@ public:
 
        controller2(float *view_init, float *offset_init);
        bool tick_update();
+       void rotate_mode();
 };

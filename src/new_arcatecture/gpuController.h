@@ -91,5 +91,5 @@ void kill_gpu_data(struct gpu_data *h_gDat);
 
 void update_GPU_lens(struct gpu_data *h_dat, struct cpu_data *cdat, struct gpu_data *d_dat);
 
-void render_and_buffer(struct gpu_data *d_gDat, struct gpu_data *h_gDat, struct cpu_data *cDat, int a, int b, void *static_data, void *dyn_data);
+void render_and_buffer(struct gpu_data *d_gDat, struct gpu_data *h_gDat, struct cpu_data *cDat, int a, int b);
 
