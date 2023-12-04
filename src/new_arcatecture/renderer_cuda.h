@@ -16,7 +16,7 @@
 
 int init(SDL_Surface *image);
        
-int alloc_asset(float *trigs, uint8_t *colors, uint32_t nTrigs);
+int alloc_asset(float *trigs, uint8_t *colors, uint32_t nTrigs, int type);
 
 int kill();
 
@@ -32,3 +32,6 @@ void *get_dynamic_render_data_p();
 
 
 int render_and_buffer_2(float *view, float *offset, instance_t *instances_arr);
+
+
+int rotate_asset(int asset_id, float *matrix);

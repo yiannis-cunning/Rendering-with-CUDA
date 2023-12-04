@@ -20,6 +20,31 @@ static controller c(pos, view);
 static windowT *wind = NULL;
 
 
+void add_instance(float *pos_in, int asset_id, int type){
+       instance_t *new_inst = (instance_t *)calloc(sizeof(instance_t), 1);
+       new_inst->asset_id = asset_id;
+       new_inst->is_visible = 1;
+       new_inst->type = type;
+       new_inst->next = NULL;
+       cpyVec(pos_in, new_inst->offset);
+       local_copy_render_data.nInstances += 1;
+
+       instance_t *head = local_copy_render_data.inst_head;
+       if(head == NULL){
+              local_copy_render_data.inst_head = new_inst;
+              return;
+       } 
+       while(head->next != NULL){
+              head = head->next;
+       }
+       head->next = new_inst;
+
+
+}
+
+
+
+
 DWORD WINAPI looper_init(LPVOID param){
 
        // 1) Get args that link to cudacore sender
@@ -40,20 +65,36 @@ DWORD WINAPI looper_init(LPVOID param){
 
        local_copy_render_data.imageSurface = wind->imageSurface;
        
-       instance_t *cow = (instance_t *)calloc(sizeof(instance_t), 1);
-       instance_t *cow2 = (instance_t *)calloc(sizeof(instance_t), 1);
-       cow->asset_id = 0;
-       cow->is_visible = 1;
-       cow->next = cow2;
-       setVector(cow->offset, 0, 0, 0);
+       float pos[3] = {0,0,0};
+       printf("making instances");
+       /*
+       for(int y = 0; y < 1; y++){
+              for(int z = 0; z < 1; z++){
+                     for(int x = 0; x < 1; x++){
+                            setVector(pos, x*5, 5*y + 5, 5*z);
+                            add_instance(pos, 1, 0);
+                     }
+              }
+       }*/
+       setVector(pos, 0, 0, 5);
+       add_instance(pos, 1, 0);
+       
+       instance_t *head = local_copy_render_data.inst_head;
+       instance_t *new_inst = (instance_t *)calloc(sizeof(instance_t), 1);
+       while(head->next != NULL){
+              head = head->next;
+       }
+       head->next = new_inst;
+       new_inst->next = NULL;
+       new_inst->type = 1;
+       new_inst->is_visible = 1;
+       new_inst->asset_id = 2;
+       setVector(new_inst->offset, 0, 0, 0);
 
-       cow2->asset_id = 0;
-       cow2->is_visible = 1;
-       cow2->next = NULL;
-       setVector(cow->offset, -500, -1000, 3385);
 
-       local_copy_render_data.inst_head = cow;
-       local_copy_render_data.nInstances = 2;
+
+       //setVector(pos, 0, -2000, 0);
+       //add_instance(pos, 1);
 
        // 3) enter msgloop
        printf("Created windows in game loop thread - starting msg loop\n");
@@ -66,6 +107,15 @@ DWORD WINAPI looper_init(LPVOID param){
 
 void kill(){
        kill_window(wind);
+
+
+       instance_t *head = local_copy_render_data.inst_head;
+       instance_t *prev;
+       while(head != NULL){
+              prev = head;
+              head = head->next;
+              free(prev);
+       }
 }
 
 // -500, -1000, 3385 
@@ -77,7 +127,7 @@ int loop_back(){
 
        int paused = 0;
        float vec1[3] = {-10, -10, -10};
-       float vec2[3] = {10, 10, 10};
+       float vec2[3] = {0, 0, 0};
        controller2 cntr2(vec1, vec2);
 
 
@@ -97,6 +147,7 @@ int loop_back(){
        unsigned int t_start, t_end;
        while(wind->isRunning)
        {
+              
               // 1) Input check
               while(SDL_PollEvent(&(wind->ev))){
                      switch ((wind->ev).type){
@@ -211,15 +262,15 @@ int loop_back(){
                      bool chnge2 = cntr2.tick_update();
                      bool changed = c.tick_update();
 
-
+                     //printf("Checking if changed...\n");
                      if(changed){
                             // 1) update state/position/dynamic data varibles
-
+                            //printf("Changed\n");
                             cpyVec(cntr2.offset, local_copy_render_data.offset_real);
                             cpyVec(cntr2.view, local_copy_render_data.view_real);
 
                             fflush(stdout);
-                            printf("\rOFFSET: %f, %f, %f \t", cntr2.offset[0], cntr2.offset[1], cntr2.offset[2]);
+                            printf("OFFSET: %f, %f, %f \t", cntr2.offset[0], cntr2.offset[1], cntr2.offset[2]);
                             printf("VIEW:   %f, %f, %f", cntr2.view[0], cntr2.view[1], cntr2.view[2]);
 
                             // 2) check if there is a frame to buffer -> if not conitnue

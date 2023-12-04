@@ -15,7 +15,9 @@ void passert(bool tf, const char *msg);
 typedef struct instance_t {
        float offset[3];
        bool is_visible;
+       
        int asset_id;
+       int type;
 
        instance_t *next;
 
