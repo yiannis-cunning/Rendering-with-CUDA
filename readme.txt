@@ -26,5 +26,6 @@ MANIFEST:
               - readSTL.cpp + readSTL.h                        # Contains code for inputing stls
        - blaarkop.stl                                          # Test stl file of a cow
               
-https://github.com/yiannis-cunning/Rendering-with-CUDA/blob/main/img1.png
-https://github.com/yiannis-cunning/Rendering-with-CUDA/blob/main/img2.png
+
+
+
