@@ -7,13 +7,14 @@
 #include "gpuController.h"
 
 
-int create_render_data(struct cpu_data **cpu_data, struct gpu_data **h_gpu_data, struct gpu_data **d_gpu_data, SDL_Surface *image, int nTrigs, const float *trigs, const Uint8 *clrs, float *v, float *o){
+
+int create_render_data(struct cpu_data **cpu_data, struct gpu_data **h_gpu_data, struct gpu_data **d_gpu_data, SDL_Surface *image, int nTrigs, const float *trigs, const Uint8 *clrs, float *v, float *o, float *v_real, float *o_real){
        // Holds all relevent dat about the objects, render constants, and imagescreen info
        //     Used to keep track of these things
 
        *cpu_data = (struct cpu_data *)malloc(sizeof(struct cpu_data));
        if(*cpu_data == NULL){printf("Error allocating space for cpu_data.\n");return 0;}
-       if(init_cpu_dat(*cpu_data, image, nTrigs, trigs, clrs, v, o) == 0){return 0;}
+       if(init_cpu_dat(*cpu_data, image, nTrigs, trigs, clrs, v, o, v_real, o_real) == 0){return 0;}
 
        // Initalize relevent data onto the GPU -> stays for the duration of the program
        //                                      -> some parts can be eddited as we go
@@ -29,7 +30,7 @@ int create_render_data(struct cpu_data **cpu_data, struct gpu_data **h_gpu_data,
        // s
 }
 
-int init_cpu_dat(struct cpu_data *dat, SDL_Surface *image, int nTrigs, const float *trigs, const Uint8 *clrs, float *v, float *o){
+int init_cpu_dat(struct cpu_data *dat, SDL_Surface *image, int nTrigs, const float *trigs, const Uint8 *clrs, float *v, float *o, float *v_real, float *o_real){
        // Copy over the amount of trigs, and allocate space for personal use
        dat->nTrigs = nTrigs;
        dat->trigs = (float *)malloc(sizeof(float)*9*nTrigs);
@@ -59,11 +60,11 @@ int init_cpu_dat(struct cpu_data *dat, SDL_Surface *image, int nTrigs, const flo
        if(dat->v == NULL){printf("Error allocating space for constants on cpu.\n"); return 0;}
 
        // Update the equation constants based on the inital position
-       update_lens(dat, v, o);
+       update_lens(dat, v, o, v_real, o_real);
        return 1;
 }
 
-void update_lens(struct cpu_data *dat, float *v, float *o){
+void update_lens(struct cpu_data *dat, float *v, float *o, float *view_real_in, float *offset_real_in){
        cpyVec(v, dat->v);
        float temp[3] = {0,0,1};
        cpyVec(o, dat->offset);
@@ -81,6 +82,20 @@ void update_lens(struct cpu_data *dat, float *v, float *o){
        *(dat->mag) = (*(dat->mag)) * (*(dat->mag));
        *(dat->c1) = (1-*(dat->a)) * *(dat->mag);
        *(dat->c1) = *(dat->c1)/(2*vecMag(dat->hx));
+
+
+       // Real view, offset calculations
+       cpyVec(view_real_in, dat->view_real);
+       cpyVec(offset_real_in, dat->offset_real);
+       setVector(temp, 0, 0, 1);
+
+       cross(view_real_in, temp, dat->hx_real);
+       //constMult(-1, dat->hx_real, dat->hx_real);
+       cross(dat->hx_real, view_real_in, dat->hy_real);
+       normalize(dat->hx_real);
+       normalize(dat->hy_real);
+
+       dat->magv_real = vecMag(view_real_in);
 }
 
 void kill_cpu_data(struct cpu_data *dat){
@@ -130,6 +145,8 @@ int init_gpu_dat(struct gpu_data *d_dat, struct gpu_data *h_dat, struct cpu_data
        temp->d_mag          = temp->d_c1 + 1;
        temp->d_offset       = temp->d_mag + 1;
 
+
+
        // copy over the triangles and the pointer list to the device
        cudaMemcpy(temp->d_trigs, cpu_dat->trigs, sizeof(float) * cpu_dat->nTrigs * 9, cudaMemcpyHostToDevice);
        cudaMemcpy((void *)d_dat, (void *)temp, sizeof(struct gpu_data), cudaMemcpyHostToDevice);
@@ -145,8 +162,11 @@ void kill_gpu_data(struct gpu_data *h_gDat){
        free(h_gDat);
 }
 
-void update_GPU_lens(struct gpu_data *h_dat, struct cpu_data *cdat){
+void update_GPU_lens(struct gpu_data *h_dat, struct cpu_data *cdat, struct gpu_data *d_dat){
        cudaMemcpy(h_dat->d_v, cdat->v, 14*sizeof(float), cudaMemcpyHostToDevice);
+       cudaMemcpy(d_dat->view_real, cdat->view_real, 13*sizeof(float), cudaMemcpyHostToDevice);
+       printf("\rOFFSET: %f, %f, %f \t", cdat->offset_real[0], cdat->offset_real[1], cdat->offset_real[2]);
+       printf("VIEW:   %f, %f, %f", cdat->view_real[0], cdat->view_real[1], cdat->view_real[2]);
 }
 
 __device__ float dot(float *v, float *w, float *o){
@@ -180,23 +200,23 @@ __global__ void cordify2(struct gpu_data *dat, int num_floats){
        float px;
        float py;
        float pz;
-       float mag = *(float *)(dat->d_mag);
+       float mag = (dat->magv_real);
 
 
        if(i < num_floats){
 
-              px = -1*dot(dat->d_trigs + i, dat->d_v, dat->d_offset);
-              py = dot(dat->d_trigs + i, dat->d_hx, dat->d_offset);
-              pz = dot(dat->d_trigs + i, dat->d_hy, dat->d_offset);
+              px = dot(dat->d_trigs + i, dat->view_real, dat->offset_real);
+              py = -1*dot(dat->d_trigs + i, dat->hx_real, dat->offset_real);
+              pz = dot(dat->d_trigs + i, dat->hy_real, dat->offset_real);
               if(px < mag){
                      *(float *)(dat->d_cords_arr + i) = -1.0f;
                      *(float *)(dat->d_cords_arr + i + 1) = -1.0f;
                      *(float *)(dat->d_cords_arr + i + 2) = -1.0f;  
               }
               else{
-                     *(float *)(dat->d_cords_arr + i) = (py*(mag)/(px)*0.5 + 0.5)*dat->d_w;
-                     *(float *)(dat->d_cords_arr + i + 1) = (pz*(mag)/(px)*0.5 + 0.5)*dat->d_h;
-                     *(float *)(dat->d_cords_arr + i + 2) = dist(dat->d_trigs + i, dat->d_v, dat->d_offset);
+                     *(float *)(dat->d_cords_arr + i) = ((py*mag*0.5)/(px) + 0.5)*dat->d_w;
+                     *(float *)(dat->d_cords_arr + i + 1) = ((pz*mag*0.5)/(px) + 0.5)*dat->d_h;
+                     *(float *)(dat->d_cords_arr + i + 2) = dist(dat->d_trigs + i, dat->view_real, dat->offset_real);
               }
        }
 }
@@ -217,11 +237,11 @@ __global__ void cordify(struct gpu_data *dat, int num_floats){ // Run for each v
        if(i < num_floats){
               // 1) calculate the x component
 
-              topx = dot(dat->d_trigs + i, dat->d_hx, dat->d_offset) * topx;
-              topy = dot(dat->d_trigs + i, dat->d_hy, dat->d_offset) * topy;
-              bot = bot - dot(dat->d_trigs + i, dat->d_v, dat->d_offset);
+              topx = dot(dat->d_trigs + i, dat->d_hx, dat->offset_real) * topx;
+              topy = dot(dat->d_trigs + i, dat->d_hy, dat->offset_real) * topy;
+              bot = bot - dot(dat->d_trigs + i, dat->d_v, dat->offset_real);
               //bot = dot(dat->d_trigs + i, dat->d_v, dat->d_offset);
-              mag = dist(dat->d_trigs + i, dat->d_v, dat->d_offset);
+              mag = dist(dat->d_trigs + i, dat->d_v, dat->offset_real);
 
               if(bot <= 0.1* *(float *)(dat->d_mag))
               //if(bot <= 0) //-0.1* *(float *)(dat->d_mag))
@@ -414,7 +434,7 @@ void render_and_buffer(struct gpu_data *d_gDat, struct gpu_data *h_gDat, struct 
        dim3 grid_size( (int)(n*3 / 512) + 1);
        dim3 block_size(512);
 
-       cordify<<<grid_size, block_size>>>(d_gDat, n*9);
+       cordify2<<<grid_size, block_size>>>(d_gDat, n*9);
 
        dim3 blck(16,16);
        draw<<<n, blck>>>(d_gDat, n*9);//(nt-ns)

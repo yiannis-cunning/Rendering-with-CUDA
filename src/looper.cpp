@@ -64,6 +64,7 @@ DWORD WINAPI looper_init(LPVOID param){
        SDL_SetRelativeMouseMode(SDL_TRUE);
 
        local_copy_render_data.imageSurface = wind->imageSurface;
+       local_copy_render_data.quit = false;
        
        float pos[3] = {0,0,0};
        printf("making instances");
@@ -270,8 +271,8 @@ int loop_back(){
                             cpyVec(cntr2.view, local_copy_render_data.view_real);
 
                             fflush(stdout);
-                            printf("OFFSET: %f, %f, %f \t", cntr2.offset[0], cntr2.offset[1], cntr2.offset[2]);
-                            printf("VIEW:   %f, %f, %f", cntr2.view[0], cntr2.view[1], cntr2.view[2]);
+                            //printf("OFFSET: %f, %f, %f \t", cntr2.offset[0], cntr2.offset[1], cntr2.offset[2]);
+                            //printf("VIEW:   %f, %f, %f", cntr2.view[0], cntr2.view[1], cntr2.view[2]);
 
                             // 2) check if there is a frame to buffer -> if not conitnue
                             ret = WaitForSingleObject(render_done_sem, 0L); // decrement command
@@ -302,8 +303,13 @@ int loop_back(){
               }
        }
 
+       ret = WaitForSingleObject(render_done_sem, INFINITE);
+       local_copy_render_data.quit = true;
+       memcpy(render_data, &local_copy_render_data, sizeof(dynamic_render_data_t));
+       ReleaseSemaphore( start_frame_sem, 1, NULL);
 
        kill();
+       printf("\nLoper thread finished\n");
        
        return 0; 
 

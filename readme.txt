@@ -29,3 +29,10 @@ MANIFEST:
 
 
 
+
+
+TD:
+       - make main runnable with main in game
+       - make sure paths are all relative?
+       - make makefile put outputs to bin, more readable, editable paths
+       - make resizeable possible
