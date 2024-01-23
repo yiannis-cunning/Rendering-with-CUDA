@@ -15,7 +15,7 @@ static HANDLE dynamic_data_mutex;
 //static dynamic_render_data_t * shared_dynamic_data = NULL;
 
 static float pos[3] = {10, 10, 0};
-static float view[3] = {-10, -10, -10};
+static float view[3] = {10, 10, 10};
 static controller c(pos, view);
 static windowT *wind = NULL;
 
@@ -68,15 +68,15 @@ DWORD WINAPI looper_init(LPVOID param){
        
        float pos[3] = {0,0,0};
        printf("making instances");
-       /*
-       for(int y = 0; y < 1; y++){
-              for(int z = 0; z < 1; z++){
-                     for(int x = 0; x < 1; x++){
+       
+       for(int y = 0; y < 10; y++){
+              for(int z = 0; z < 10; z++){
+                     for(int x = 0; x < 10; x++){
                             setVector(pos, x*5, 5*y + 5, 5*z);
                             add_instance(pos, 1, 0);
                      }
               }
-       }*/
+       }
        setVector(pos, 0, 0, 5);
        add_instance(pos, 1, 0);
        
@@ -98,7 +98,7 @@ DWORD WINAPI looper_init(LPVOID param){
        //add_instance(pos, 1);
 
        // 3) enter msgloop
-       printf("Created windows in game loop thread - starting msg loop\n");
+       printf("Looper thread finished init...\n");
        
        loop_back();
 
@@ -127,8 +127,8 @@ int loop_back(){
        DWORD ret;
 
        int paused = 0;
-       float vec1[3] = {-10, -10, -10};
-       float vec2[3] = {0, 0, 0};
+       float vec1[3] = {5.164129, 16.512728, -0.8133828};
+       float vec2[3] = {-4.96, -30.566, 6.948};
        controller2 cntr2(vec1, vec2);
 
 
@@ -143,8 +143,7 @@ int loop_back(){
 
        // Allow rendered to init and send first frame
        ReleaseSemaphore( start_frame_sem, 1, NULL);
-
-
+       printf("Starting looper loop !!!!!!!!!\n\n");
        unsigned int t_start, t_end;
        while(wind->isRunning)
        {
@@ -271,8 +270,8 @@ int loop_back(){
                             cpyVec(cntr2.view, local_copy_render_data.view_real);
 
                             fflush(stdout);
-                            //printf("OFFSET: %f, %f, %f \t", cntr2.offset[0], cntr2.offset[1], cntr2.offset[2]);
-                            //printf("VIEW:   %f, %f, %f", cntr2.view[0], cntr2.view[1], cntr2.view[2]);
+                            printf("\rOFFSET: %f, %f, %f \t", cntr2.offset[0], cntr2.offset[1], cntr2.offset[2]);
+                            printf("VIEW:   %f, %f, %f", cntr2.view[0], cntr2.view[1], cntr2.view[2]);
 
                             // 2) check if there is a frame to buffer -> if not conitnue
                             ret = WaitForSingleObject(render_done_sem, 0L); // decrement command

@@ -789,7 +789,7 @@ float3 vec_to_float3(float *v){
 int render_and_buffer_2(float *view, float *offset, instance_t *instances_arr){
        // Launch 1 kernel per instances
        
-       printf("Starting to render...\n");
+       //printf("Starting to render...\n");
        // 1. Paint pixels white and reset depth array to max
        cudaMemset(allocs->d_pixels_arr, (Uint8)(0), allocs->pixel_arr_size);
        cudaMemset(allocs->d_depthScreen_arr, (Uint8)(0xFF), allocs->depth_arr_size);
@@ -804,7 +804,7 @@ int render_and_buffer_2(float *view, float *offset, instance_t *instances_arr){
        float magv = 0;
 
        while(inst != NULL){
-              printf("Getting next instance...\n");
+              //printf("Getting next instance...\n");
               if(inst->is_visible == false){continue;}  // NON-VISIBLE
               asset = get_nth_record(allocs->asset_record_head, inst->asset_id);
               if(asset == NULL){continue;}             // UNKOWN ASSET
@@ -817,8 +817,8 @@ int render_and_buffer_2(float *view, float *offset, instance_t *instances_arr){
               cross(hx, view, hy);
               normalize(hx);
               normalize(hy);
-              magv = vecMag(view);
-              printf("Have first instance: type = %d, asset_id = %d, asset_type = %d, pos: %f. %f. %f\n", inst->type, inst->asset_id, asset->type, inst->offset[0], inst->offset[1], inst->offset[2]);
+              magv = vecMag(view)*5;
+              //printf("Have first instance: type = %d, asset_id = %d, asset_type = %d, pos: %f. %f. %f\n", inst->type, inst->asset_id, asset->type, inst->offset[0], inst->offset[1], inst->offset[2]);
               if(inst->type == 0 && asset->type == 0){
                      dim3 grid_size( (int)(asset->nTrigs*3 / 512) + 1);
                      dim3 block_size(512);
@@ -839,7 +839,7 @@ int render_and_buffer_2(float *view, float *offset, instance_t *instances_arr){
                                                  allocs->w, allocs->BPP, allocs->pitch);
 
               } else if(inst->type = 1 && asset->type == 1){
-                     printf("Sending kernel lines %d", asset->nLines);
+                     //printf("Sending kernel lines %d", asset->nLines);
                      dim3 grid_size( (int)(asset->nLines*2 / 512) + 1);
                      dim3 block_size(512);
                      // Kernel launch - cordify

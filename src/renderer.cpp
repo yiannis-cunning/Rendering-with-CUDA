@@ -124,11 +124,10 @@ DWORD WINAPI cuda_sender_init(LPVOID param){
        printf("Allocating space for asset...\n");
        alloc_asset(lines, clrs_l, nLines, 1);
 
-       printf("Done alocs\n");
        free(lines);
        free(clrs_l);
 
-       printf("Starting redner loop\n");
+       printf("Starting render loop\n");
        cuda_sender_loop(param);
 
        return 1;
@@ -143,13 +142,12 @@ int cuda_sender_loop(LPVOID param){
        render_and_buffer_2(dynamic_render_data->view_real, dynamic_render_data->offset_real, dynamic_render_data->inst_head);
        ReleaseSemaphore( finish_use_sem, 1, NULL);
 
-       printf("Starting render loop");
        while(1){
 
               // 1) wait for request to send render frame
               ret = WaitForSingleObject(sendkernel_sem, INFINITE); // decrement command
               if(dynamic_render_data->quit == true){break;}
-              printf("Got signal - Rendering...\n");
+              //printf("Got signal - Rendering...\n");
               // 2) get the dynamic data and load it  + launch all the kernels
               render_and_buffer_2(dynamic_render_data->view_real, dynamic_render_data->offset_real, dynamic_render_data->inst_head);
 
